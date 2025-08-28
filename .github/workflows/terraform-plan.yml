@@ -1,24 +1,54 @@
-# name: Terraform Plan
+name: Terraform Apply (on push to main)
 
-# on:
-#   pull_request:
-#     branches: [ main ]
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'tf-files/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
 
-# jobs:
-#   terraform:
-#     runs-on: ubuntu-latest
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: tf-files
+    concurrency:
+      group: tf-apply-${{ github.ref }}
+      cancel-in-progress: false
 
-#     steps:
-#       - uses: actions/checkout@v2
+    steps:
+      - uses: actions/checkout@v4
 
-#       - name: Setup Terraform
-#         uses: hashicorp/setup-terraform@v1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
 
-#       - name: Terraform Init
-#         run: terraform init
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-#       - name: Terraform Format
-#         run: terraform fmt -check
+      - run: terraform init -input=false -no-color
 
-#       - name: Terraform Plan
-#         run: terraform plan
+      # Run plan, capture exit code; fail only on error (1), not on "no changes" (0) or "changes" (2)
+      - name: Terraform plan (capture exit code)
+        id: plan
+        shell: bash
+        run: |
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then
+            echo "Terraform plan failed"; exit 1
+          fi
+
+      # Apply only when there are changes (exit code 2)
+      - name: Terraform apply
+        if: steps.plan.outputs.exit_code == '2'
+        run: terraform apply -input=false -auto-approve
