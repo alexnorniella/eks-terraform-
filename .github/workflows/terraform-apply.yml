@@ -8,9 +8,8 @@ on:
       - '.github/workflows/**'
   workflow_dispatch:
 
-# prevent overlapping runs
 concurrency:
-  group: terraform-${{ github.ref }}
+  group: terraform-apply-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
